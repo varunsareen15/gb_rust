@@ -112,6 +112,7 @@ enum Instruction {
     ADC(ArithmeticTarget),
     SUB(SubtractionTarget),
     SBC(SubtractionTarget),
+    AND(LogicalTarget),
 }
 
 enum ArithmeticTarget {
@@ -123,6 +124,10 @@ enum ArithmeticHLTarget {
 }
 
 enum SubtractionTarget {
+    A, B, C, D, E, H, L, HL, Imm8,
+}
+
+enum LogicalTarget {
     A, B, C, D, E, H, L, HL, Imm8,
 }
 
@@ -419,6 +424,65 @@ impl CPU {
                     }
                 }
             }
+            Instruction::AND(target) => { // Finished AND
+                match target {
+                    LogicalTarget::A => {
+                        let value = self.registers.a;
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::B => {
+                        let value = self.registers.b;
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::C => {
+                        let value = self.registers.c;
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::D => {
+                        let value = self.registers.d;
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::E => {
+                        let value = self.registers.l;
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::H => {
+                        let value = self.registers.h;
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::L => {
+                        let value = self.registers.l;
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::HL => {
+                        let addr = self.registers.get_hl();
+                        let value = self.bus.read_byte(addr);
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::Imm8 => {
+                        let value = self.read_next_byte();
+                        let new_value = self.and(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(2)
+                    }
+                }
+            }
             Instruction::JP(test) => {
                 let jump_condition = match test {
                     JumpTest::NotZero => !self.registers.f.zero,
@@ -591,6 +655,15 @@ impl CPU {
         // Half-carry: if the lower nibble of A is less than the sum of the lower nibble of value and carry.
         self.registers.f.half_carry = (self.registers.a & 0xF) < ((value & 0xF) + carry_in);
         self.registers.f.carry = did_overflow1 || did_overflow2;
+        result
+    }
+    
+    fn and(&mut self, value: u8) -> u8 {
+        let result = self.registers.a & value;
+        self.registers.f.zero = result == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = true; // AND always sets the half-carry flag.
+        self.registers.f.carry = false;
         result
     }
 
