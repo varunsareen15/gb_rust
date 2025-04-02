@@ -114,6 +114,7 @@ enum Instruction {
     SBC(SubtractionTarget),
     AND(LogicalTarget),
     OR(LogicalTarget),
+    XOR(LogicalTarget),
 }
 
 enum ArithmeticTarget {
@@ -543,6 +544,65 @@ impl CPU {
                     }
                 }
             }
+            Instruction::XOR(target) => {
+                match target {
+                    LogicalTarget::A => {
+                        let value = self.registers.a;
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::B => {
+                        let value = self.registers.b;
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::C => {
+                        let value = self.registers.c;
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::D => {
+                        let value = self.registers.d;
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::E => {
+                        let value = self.registers.e;
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::H => {
+                        let value = self.registers.h;
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::L => {
+                        let value = self.registers.l;
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::HL => {
+                        let addr = self.registers.get_hl();
+                        let value = self.bus.read_byte(addr);
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::Imm8 => {
+                        let value = self.read_next_byte();
+                        let new_value = self.xor(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(2)
+                    }
+                }
+            }
             Instruction::JP(test) => {
                 let jump_condition = match test {
                     JumpTest::NotZero => !self.registers.f.zero,
@@ -729,6 +789,15 @@ impl CPU {
 
     fn or(&mut self, value: u8) -> u8 {
         let result = self.registers.a | value;
+        self.registers.f.zero = result == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.carry = false;
+        result
+    }
+
+    fn xor(&mut self, value: u8) -> u8 {
+        let result = self.registers.a ^ value;
         self.registers.f.zero = result == 0;
         self.registers.f.subtract = false;
         self.registers.f.half_carry = false;
@@ -1121,6 +1190,101 @@ mod tests {
         assert_eq!(cpu.registers.f.subtract, true);
         assert_eq!(cpu.registers.f.carry, false);
         assert_eq!(cpu.registers.f.half_carry, false);
+    }
+
+    // AND, OR, XOR TESTS
+
+    #[test]
+    fn test_and_non_zero() {
+        let mut cpu = CPU::default();
+        // Set A to a value where ANDing with 0xAA produces a nonzero result.
+        // For example, A = 0xCC (11001100) and 0xAA (10101010) gives 0x88 (10001000)
+        cpu.registers.a = 0xCC;
+        let result = cpu.and(0xAA);
+        assert_eq!(result, 0x88);
+        // The result is nonzero so zero flag is false.
+        assert_eq!(cpu.registers.f.zero, false);
+        // Subtract flag should be false.
+        assert_eq!(cpu.registers.f.subtract, false);
+        // AND always sets the half-carry flag to true.
+        assert_eq!(cpu.registers.f.half_carry, true);
+        // Carry flag is cleared.
+        assert_eq!(cpu.registers.f.carry, false);
+    }
+
+    #[test]
+    fn test_and_zero_result() {
+        let mut cpu = CPU::default();
+        // A = 0xF0 and operand 0x0F will yield 0xF0 & 0x0F = 0x00.
+        cpu.registers.a = 0xF0;
+        let result = cpu.and(0x0F);
+        assert_eq!(result, 0x00);
+        // Result is zero so zero flag is set.
+        assert_eq!(cpu.registers.f.zero, true);
+        assert_eq!(cpu.registers.f.subtract, false);
+        // AND always sets half-carry.
+        assert_eq!(cpu.registers.f.half_carry, true);
+        assert_eq!(cpu.registers.f.carry, false);
+    }
+
+    #[test]
+    fn test_or_non_zero() {
+        let mut cpu = CPU::default();
+        // For OR, choose A = 0x10 and operand 0x02 so that 0x10 | 0x02 = 0x12.
+        cpu.registers.a = 0x10;
+        let result = cpu.or(0x02);
+        assert_eq!(result, 0x12);
+        // Nonzero result: zero flag should be false.
+        assert_eq!(cpu.registers.f.zero, false);
+        // OR clears subtract flag.
+        assert_eq!(cpu.registers.f.subtract, false);
+        // For OR, half-carry flag is cleared.
+        assert_eq!(cpu.registers.f.half_carry, false);
+        // Carry flag is also cleared.
+        assert_eq!(cpu.registers.f.carry, false);
+    }
+
+    #[test]
+    fn test_or_zero_result() {
+        let mut cpu = CPU::default();
+        // Setting both A and the operand to 0 gives a result of 0.
+        cpu.registers.a = 0x00;
+        let result = cpu.or(0x00);
+        assert_eq!(result, 0x00);
+        // Result is zero so the zero flag should be set.
+        assert_eq!(cpu.registers.f.zero, true);
+        assert_eq!(cpu.registers.f.subtract, false);
+        assert_eq!(cpu.registers.f.half_carry, false);
+        assert_eq!(cpu.registers.f.carry, false);
+    }
+
+    #[test]
+    fn test_xor_zero_result() {
+        let mut cpu = CPU::default();
+        // XORing a value with itself yields zero.
+        cpu.registers.a = 0xAA;
+        let result = cpu.xor(0xAA);
+        assert_eq!(result, 0x00);
+        // Result is zero so zero flag is set.
+        assert_eq!(cpu.registers.f.zero, true);
+        // Subtract, half-carry, and carry flags should be false.
+        assert_eq!(cpu.registers.f.subtract, false);
+        assert_eq!(cpu.registers.f.half_carry, false);
+        assert_eq!(cpu.registers.f.carry, false);
+    }
+
+    #[test]
+    fn test_xor_non_zero() {
+        let mut cpu = CPU::default();
+        // For example, A = 0xF0 and operand = 0x0F gives 0xF0 ^ 0x0F = 0xFF.
+        cpu.registers.a = 0xF0;
+        let result = cpu.xor(0x0F);
+        assert_eq!(result, 0xFF);
+        // Nonzero result: zero flag should be false.
+        assert_eq!(cpu.registers.f.zero, false);
+        assert_eq!(cpu.registers.f.subtract, false);
+        assert_eq!(cpu.registers.f.half_carry, false);
+        assert_eq!(cpu.registers.f.carry, false);
     }
 }
 
