@@ -113,6 +113,7 @@ enum Instruction {
     SUB(SubtractionTarget),
     SBC(SubtractionTarget),
     AND(LogicalTarget),
+    OR(LogicalTarget),
 }
 
 enum ArithmeticTarget {
@@ -483,6 +484,65 @@ impl CPU {
                     }
                 }
             }
+            Instruction::OR(target) => { // Finished OR
+                match target {
+                    LogicalTarget::A => {
+                        let value = self.registers.a;
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::B => {
+                        let value = self.registers.a;
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::C => {
+                        let value = self.registers.c;
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::D => {
+                        let value = self.registers.d;
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::E => {
+                        let value = self.registers.e;
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::H => {
+                        let value = self.registers.h;
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::L => {
+                        let value = self.registers.l;
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::HL => {
+                        let addr = self.registers.get_hl();
+                        let value = self.bus.read_byte(addr);
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(1)
+                    }
+                    LogicalTarget::Imm8 => {
+                        let value = self.read_next_byte();
+                        let new_value = self.or(value);
+                        self.registers.a = new_value;
+                        self.pc.wrapping_add(2)
+                    }
+                }
+            }
             Instruction::JP(test) => {
                 let jump_condition = match test {
                     JumpTest::NotZero => !self.registers.f.zero,
@@ -663,6 +723,15 @@ impl CPU {
         self.registers.f.zero = result == 0;
         self.registers.f.subtract = false;
         self.registers.f.half_carry = true; // AND always sets the half-carry flag.
+        self.registers.f.carry = false;
+        result
+    }
+
+    fn or(&mut self, value: u8) -> u8 {
+        let result = self.registers.a | value;
+        self.registers.f.zero = result == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
         self.registers.f.carry = false;
         result
     }
