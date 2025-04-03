@@ -115,6 +115,7 @@ enum Instruction {
     AND(LogicalTarget),
     OR(LogicalTarget),
     XOR(LogicalTarget),
+    CP(SubtractionTarget),
 }
 
 enum ArithmeticTarget {
@@ -603,6 +604,56 @@ impl CPU {
                     }
                 }
             }
+            Instruction::CP(target) => {
+                match target {
+                    SubtractionTarget::A => {
+                        let value = self.registers.a;
+                        self.cp(value);
+                        self.pc.wrapping_add(1)
+                    }
+                    SubtractionTarget::B => {
+                        let value = self.registers.b;
+                        self.cp(value);
+                        self.pc.wrapping_add(1)
+                    }
+                    SubtractionTarget::C => {
+                        let value = self.registers.c;
+                        self.cp(value);
+                        self.pc.wrapping_add(1)
+                    }
+                    SubtractionTarget::D => {
+                        let value = self.registers.d;
+                        self.cp(value);
+                        self.pc.wrapping_add(1)
+                    }
+                    SubtractionTarget::E => {
+                        let value = self.registers.e;
+                        self.cp(value);
+                        self.pc.wrapping_add(1)
+                    }
+                    SubtractionTarget::H => {
+                        let value = self.registers.h;
+                        self.cp(value);
+                        self.pc.wrapping_add(1)
+                    }
+                    SubtractionTarget::L => {
+                        let value = self.registers.l;
+                        self.cp(value);
+                        self.pc.wrapping_add(1)
+                    }
+                    SubtractionTarget::HL => {
+                        let addr = self.registers.get_hl();
+                        let value = self.bus.read_byte(addr);
+                        self.cp(value);
+                        self.pc.wrapping_add(1)
+                    }
+                    SubtractionTarget::Imm8 => {
+                        let value = self.read_next_byte();
+                        self.cp(value);
+                        self.pc.wrapping_add(2)
+                    }
+                }
+            }
             Instruction::JP(test) => {
                 let jump_condition = match test {
                     JumpTest::NotZero => !self.registers.f.zero,
@@ -803,6 +854,14 @@ impl CPU {
         self.registers.f.half_carry = false;
         self.registers.f.carry = false;
         result
+    }
+
+    fn cp(&mut self, value: u8) {
+        let (result, did_overflow) = self.registers.a.overflowing_sub(value);
+        self.registers.f.zero = result == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.half_carry = (self.registers.a & 0xF) < (value & 0xF);
+        self.registers.f.carry = did_overflow;
     }
 
     fn read_next_word(&self) -> u16 { 0 }
