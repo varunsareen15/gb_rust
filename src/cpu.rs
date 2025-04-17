@@ -545,7 +545,7 @@ impl CPU {
                     }
                 }
             }
-            Instruction::XOR(target) => {
+            Instruction::XOR(target) => { // Finished XOR
                 match target {
                     LogicalTarget::A => {
                         let value = self.registers.a;
@@ -604,7 +604,7 @@ impl CPU {
                     }
                 }
             }
-            Instruction::CP(target) => {
+            Instruction::CP(target) => { // FInished CP 
                 match target {
                     SubtractionTarget::A => {
                         let value = self.registers.a;
