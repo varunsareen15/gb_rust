@@ -1,0 +1,51 @@
+use crate::cpu::CPU;
+use crate::cartridge::Cartridge;
+
+pub const CYCLES_PER_FRAME: u32 = 70224;
+
+pub struct GameBoy {
+    pub cpu: CPU,
+}
+
+impl GameBoy {
+    pub fn new(cartridge: Cartridge) -> Self {
+        let cpu = CPU::new(cartridge);
+        GameBoy { cpu }
+    }
+
+    pub fn run_frame(&mut self) {
+        let mut cycles_this_frame: u32 = 0;
+        while cycles_this_frame < CYCLES_PER_FRAME {
+            let cycles = self.cpu.step();
+
+            // Tick timer
+            self.cpu.bus.timer.tick(cycles);
+            if self.cpu.bus.timer.interrupt {
+                self.cpu.bus.if_register |= 0x04; // Timer interrupt
+            }
+
+            // Tick PPU
+            let vram_copy = self.cpu.bus.vram;
+            let oam_copy = self.cpu.bus.oam;
+            self.cpu.bus.ppu.tick(cycles, &vram_copy, &oam_copy);
+            if self.cpu.bus.ppu.vblank_interrupt {
+                self.cpu.bus.if_register |= 0x01; // VBlank interrupt
+            }
+            if self.cpu.bus.ppu.stat_interrupt {
+                self.cpu.bus.if_register |= 0x02; // LCD STAT interrupt
+            }
+
+            // Joypad interrupt
+            if self.cpu.bus.joypad.interrupt {
+                self.cpu.bus.if_register |= 0x10; // Joypad interrupt
+                self.cpu.bus.joypad.interrupt = false;
+            }
+
+            cycles_this_frame += cycles as u32;
+        }
+    }
+
+    pub fn framebuffer(&self) -> &[u8; 160 * 144] {
+        &self.cpu.bus.ppu.framebuffer
+    }
+}
