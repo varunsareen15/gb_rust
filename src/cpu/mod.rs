@@ -15,6 +15,7 @@ pub struct CPU {
     pub ime: bool,
     pub halted: bool,
     ei_pending: bool,
+    halt_bug: bool,
 }
 
 impl CPU {
@@ -27,6 +28,7 @@ impl CPU {
             ime: false,
             halted: false,
             ei_pending: false,
+            halt_bug: false,
         };
         // Post-boot register state (DMG)
         cpu.registers.a = 0x01;
@@ -50,6 +52,18 @@ impl CPU {
             return 4; // HALT consumes 4 T-cycles per tick
         }
 
+        let halt_bug_active = self.halt_bug;
+        if halt_bug_active {
+            self.halt_bug = false;
+        }
+
+        // Handle delayed EI: IME becomes true after the instruction following EI
+        if self.ei_pending {
+            self.ei_pending = false;
+            self.ime = true;
+        }
+
+        let pc_before_execute = self.pc;
         let mut instruction_byte = self.bus.read_byte(self.pc);
         let prefixed = instruction_byte == 0xCB;
         if prefixed {
@@ -62,13 +76,10 @@ impl CPU {
             panic!("Unknown instruction found for: {} at PC={:#06x}", description, self.pc)
         };
 
-        // Handle delayed EI
-        if self.ei_pending {
-            self.ei_pending = false;
-            self.ime = true;
-        }
-
         self.pc = next_pc;
+        if halt_bug_active {
+            self.pc = pc_before_execute;
+        }
         cycles
     }
 
@@ -101,7 +112,7 @@ impl CPU {
         0
     }
 
-    fn resolve_byte_target(&self, target: &ByteTarget) -> (u8, u16) {
+    fn resolve_byte_target(&mut self, target: &ByteTarget) -> (u8, u16) {
         match target {
             ByteTarget::A => (self.registers.a, 1),
             ByteTarget::B => (self.registers.b, 1),
@@ -115,7 +126,7 @@ impl CPU {
         }
     }
 
-    fn read_prefix_target(&self, target: &PrefixTarget) -> u8 {
+    fn read_prefix_target(&mut self, target: &PrefixTarget) -> u8 {
         match target {
             PrefixTarget::A => self.registers.a,
             PrefixTarget::B => self.registers.b,
@@ -537,7 +548,11 @@ impl CPU {
                 (self.pc.wrapping_add(1), 4)
             }
             Instruction::HALT => {
-                self.halted = true;
+                if !self.ime && (self.bus.if_register & self.bus.ie_register & 0x1F) != 0 {
+                    self.halt_bug = true;
+                } else {
+                    self.halted = true;
+                }
                 (self.pc.wrapping_add(1), 4)
             }
             Instruction::STOP => {
@@ -679,7 +694,7 @@ impl CPU {
         self.bus.write_byte(self.sp, (value & 0xFF) as u8);
     }
 
-    fn jump(&self, should_jump: bool) -> u16 {
+    fn jump(&mut self, should_jump: bool) -> u16 {
         if should_jump {
             let least_significant_byte = self.bus.read_byte(self.pc + 1) as u16;
             let most_significant_byte = self.bus.read_byte(self.pc + 2) as u16;
@@ -689,7 +704,7 @@ impl CPU {
         }
     }
 
-    fn jr(&self, should_jump: bool) -> u16 {
+    fn jr(&mut self, should_jump: bool) -> u16 {
         if should_jump {
             let offset = self.read_next_byte() as i8;
             self.pc.wrapping_add(2).wrapping_add(offset as u16)
@@ -975,13 +990,13 @@ impl CPU {
 
     // --- Memory read helpers ---
 
-    fn read_next_word(&self) -> u16 {
+    fn read_next_word(&mut self) -> u16 {
         let least_significant_byte = self.bus.read_byte(self.pc + 1) as u16;
         let most_significant_byte = self.bus.read_byte(self.pc + 2) as u16;
         (most_significant_byte << 8) | least_significant_byte
     }
 
-    fn read_next_byte(&self) -> u8 {
+    fn read_next_byte(&mut self) -> u8 {
         self.bus.read_byte(self.pc + 1)
     }
 }
@@ -996,6 +1011,7 @@ impl Default for CPU {
             ime: false,
             halted: false,
             ei_pending: false,
+            halt_bug: false,
         }
     }
 }

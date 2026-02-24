@@ -21,12 +21,15 @@ const GB_COLORS: [u32; 4] = [
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <rom.gb>", args[0]);
+    let headless = args.iter().any(|a| a == "--headless");
+    let rom_args: Vec<&String> = args.iter().skip(1).filter(|a| *a != "--headless").collect();
+
+    if rom_args.is_empty() {
+        eprintln!("Usage: {} [--headless] <rom.gb>", args[0]);
         std::process::exit(1);
     }
 
-    let cartridge = Cartridge::from_file(&args[1]).unwrap_or_else(|e| {
+    let cartridge = Cartridge::from_file(rom_args[0]).unwrap_or_else(|e| {
         eprintln!("Error loading ROM: {}", e);
         std::process::exit(1);
     });
@@ -36,6 +39,22 @@ fn main() {
 
     let mut gb = GameBoy::new(cartridge);
 
+    if headless {
+        run_headless(&mut gb);
+    } else {
+        run_windowed(&mut gb);
+    }
+}
+
+fn run_headless(gb: &mut GameBoy) {
+    // Run for up to ~30 seconds of emulated time (~1800 frames)
+    for _ in 0..1800 {
+        gb.run_frame();
+    }
+    eprintln!();
+}
+
+fn run_windowed(gb: &mut GameBoy) {
     let mut window = Window::new(
         "GB Emulator",
         160,
@@ -53,7 +72,7 @@ fn main() {
         let frame_start = Instant::now();
 
         // Handle input
-        update_joypad(&window, &mut gb);
+        update_joypad(&window, gb);
 
         // Run one frame
         gb.run_frame();

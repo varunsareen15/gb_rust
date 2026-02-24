@@ -16,12 +16,17 @@ impl GameBoy {
     pub fn run_frame(&mut self) {
         let mut cycles_this_frame: u32 = 0;
         while cycles_this_frame < CYCLES_PER_FRAME {
+            self.cpu.bus.cycles_ticked = 0;
             let cycles = self.cpu.step();
 
-            // Tick timer
-            self.cpu.bus.timer.tick(cycles);
-            if self.cpu.bus.timer.interrupt {
-                self.cpu.bus.if_register |= 0x04; // Timer interrupt
+            // Tick timer for remaining cycles not already ticked during bus accesses
+            let remaining = cycles.saturating_sub(self.cpu.bus.cycles_ticked);
+            if remaining > 0 {
+                self.cpu.bus.timer.tick(remaining);
+                if self.cpu.bus.timer.interrupt {
+                    self.cpu.bus.if_register |= 0x04;
+                    self.cpu.bus.timer.interrupt = false;
+                }
             }
 
             // Tick PPU

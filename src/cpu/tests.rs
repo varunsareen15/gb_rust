@@ -768,3 +768,149 @@ fn test_all_cb_opcodes_decoded() {
         );
     }
 }
+
+// ===============================================
+// Tests for HALT bug
+// ===============================================
+#[test]
+fn test_halt_bug_triggers() {
+    // IME=0 + pending interrupt → halt_bug=true, halted=false
+    let mut cpu = CPU::default();
+    cpu.pc = 0xC000; // Use WRAM (writable)
+    cpu.ime = false;
+    cpu.bus.ie_register = 0x01; // VBlank enabled
+    cpu.bus.if_register = 0x01; // VBlank pending
+    // Write HALT opcode (0x76) at PC
+    cpu.bus.write_byte(0xC000, 0x76);
+    // Write NOP after HALT for the next step
+    cpu.bus.write_byte(0xC001, 0x00);
+
+    cpu.step(); // executes HALT
+    assert!(!cpu.halted, "CPU should NOT be halted (halt bug)");
+    assert!(cpu.halt_bug, "halt_bug flag should be set");
+}
+
+#[test]
+fn test_halt_bug_double_read() {
+    // Instruction after HALT executes but PC doesn't advance
+    let mut cpu = CPU::default();
+    cpu.pc = 0xC000;
+    cpu.ime = false;
+    cpu.bus.ie_register = 0x01;
+    cpu.bus.if_register = 0x01;
+    // Write HALT at 0xC000, then INC B (0x04) at 0xC001
+    cpu.bus.write_byte(0xC000, 0x76);
+    cpu.bus.write_byte(0xC001, 0x04); // INC B
+    cpu.registers.b = 0x00;
+
+    cpu.step(); // executes HALT → sets halt_bug, PC becomes 0xC001
+    assert!(cpu.halt_bug);
+    assert_eq!(cpu.pc, 0xC001);
+
+    cpu.step(); // executes INC B at 0xC001, but PC stays at 0xC001 due to halt bug
+    assert_eq!(cpu.registers.b, 1);
+    assert_eq!(cpu.pc, 0xC001, "PC should not advance due to halt bug (double read)");
+    assert!(!cpu.halt_bug, "halt_bug should be cleared after one use");
+
+    cpu.step(); // executes INC B at 0xC001 again, this time PC advances normally
+    assert_eq!(cpu.registers.b, 2);
+    assert_eq!(cpu.pc, 0xC002);
+}
+
+#[test]
+fn test_halt_normal_ime_enabled() {
+    // IME=1, no pending interrupt yet → normal halt (halted=true), no halt bug
+    let mut cpu = CPU::default();
+    cpu.pc = 0xC000;
+    cpu.ime = true;
+    cpu.bus.ie_register = 0x01;
+    cpu.bus.if_register = 0x00; // no pending yet
+    cpu.bus.write_byte(0xC000, 0x76);
+
+    cpu.step(); // executes HALT
+    assert!(cpu.halted, "CPU should be halted normally when IME=1");
+    assert!(!cpu.halt_bug);
+}
+
+#[test]
+fn test_halt_normal_no_pending() {
+    // IME=0, no pending interrupts → normal halt (halted=true)
+    let mut cpu = CPU::default();
+    cpu.pc = 0xC000;
+    cpu.ime = false;
+    cpu.bus.ie_register = 0x01;
+    cpu.bus.if_register = 0x00; // no pending
+    cpu.bus.write_byte(0xC000, 0x76);
+
+    cpu.step(); // executes HALT
+    assert!(cpu.halted, "CPU should be halted normally when no pending interrupts");
+    assert!(!cpu.halt_bug);
+}
+
+// ===============================================
+// Tests for delayed EI timing
+// ===============================================
+#[test]
+fn test_ei_delayed_by_one_instruction() {
+    // EI sets ei_pending but IME should not become true until after the NEXT instruction
+    let mut cpu = CPU::default();
+    cpu.pc = 0xC000;
+    cpu.ime = false;
+    cpu.bus.ie_register = 0x01; // VBlank enabled
+    cpu.bus.if_register = 0x00; // No pending interrupts yet
+
+    // Write EI (0xFB) at 0xC000, then NOP (0x00) at 0xC001
+    cpu.bus.write_byte(0xC000, 0xFB); // EI
+    cpu.bus.write_byte(0xC001, 0x00); // NOP
+    cpu.bus.write_byte(0xC002, 0x00); // NOP
+
+    // Step 1: Execute EI — sets ei_pending, IME still false
+    cpu.step();
+    assert_eq!(cpu.pc, 0xC001);
+    assert!(!cpu.ime, "IME should still be false immediately after EI");
+    assert!(cpu.ei_pending, "ei_pending should be set after EI");
+
+    // Step 2: Execute NOP — ei_pending processed before execute, IME becomes true
+    cpu.step();
+    assert_eq!(cpu.pc, 0xC002);
+    assert!(cpu.ime, "IME should be true after the instruction following EI");
+}
+
+// ===============================================
+// Tests for serial port stub
+// ===============================================
+#[test]
+fn test_serial_transfer_completes() {
+    let mut cpu = CPU::default();
+    cpu.bus.write_byte(0xFF01, 0x42); // write data to SB
+    // Request transfer with internal clock (bit 7 + bit 0)
+    cpu.bus.write_byte(0xFF02, 0x81);
+    // Transfer completes immediately: SB = 0xFF (no link partner)
+    assert_eq!(cpu.bus.read_byte(0xFF01), 0xFF);
+    // SC bit 7 cleared (transfer complete)
+    assert_eq!(cpu.bus.read_byte(0xFF02) & 0x80, 0x00);
+    // Serial interrupt requested (bit 3 of IF)
+    assert_eq!(cpu.bus.if_register & 0x08, 0x08);
+}
+
+#[test]
+fn test_serial_no_transfer_without_start() {
+    let mut cpu = CPU::default();
+    cpu.bus.write_byte(0xFF01, 0x42); // write data to SB
+    // Write SC without bit 7 → no transfer
+    cpu.bus.write_byte(0xFF02, 0x01);
+    // SB unchanged
+    assert_eq!(cpu.bus.read_byte(0xFF01), 0x42);
+    // No serial interrupt
+    assert_eq!(cpu.bus.if_register & 0x08, 0x00);
+}
+
+#[test]
+fn test_serial_sb_readwrite() {
+    let mut cpu = CPU::default();
+    // SB is readable/writable
+    cpu.bus.write_byte(0xFF01, 0xAB);
+    assert_eq!(cpu.bus.read_byte(0xFF01), 0xAB);
+    cpu.bus.write_byte(0xFF01, 0x00);
+    assert_eq!(cpu.bus.read_byte(0xFF01), 0x00);
+}

@@ -1,5 +1,4 @@
 pub struct Timer {
-    pub div: u8,
     pub tima: u8,
     pub tma: u8,
     pub tac: u8,
@@ -65,7 +64,6 @@ impl Timer {
 impl Default for Timer {
     fn default() -> Self {
         Timer {
-            div: 0,
             tima: 0,
             tma: 0,
             tac: 0,

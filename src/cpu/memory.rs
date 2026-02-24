@@ -15,6 +15,7 @@ pub struct MemoryBus {
     pub timer: Timer,
     pub ppu: Ppu,
     pub joypad: Joypad,
+    pub cycles_ticked: u8,
 }
 
 impl MemoryBus {
@@ -31,10 +32,20 @@ impl MemoryBus {
             timer: Timer::default(),
             ppu: Ppu::default(),
             joypad: Joypad::default(),
+            cycles_ticked: 0,
         }
     }
 
-    pub fn read_byte(&self, address: u16) -> u8 {
+    fn tick_m_cycle(&mut self) {
+        self.timer.tick(4);
+        if self.timer.interrupt {
+            self.if_register |= 0x04;
+            self.timer.interrupt = false;
+        }
+        self.cycles_ticked += 4;
+    }
+
+    fn read_byte_no_tick(&self, address: u16) -> u8 {
         match address {
             0x0000..=0x7FFF => self.cartridge.read_byte(address),
             0x8000..=0x9FFF => self.vram[(address - 0x8000) as usize],
@@ -47,6 +58,12 @@ impl MemoryBus {
             0xFF80..=0xFFFE => self.hram[(address - 0xFF80) as usize],
             0xFFFF => self.ie_register,
         }
+    }
+
+    pub fn read_byte(&mut self, address: u16) -> u8 {
+        let value = self.read_byte_no_tick(address);
+        self.tick_m_cycle();
+        value
     }
 
     pub fn write_byte(&mut self, address: u16, byte: u8) {
@@ -62,11 +79,14 @@ impl MemoryBus {
             0xFF80..=0xFFFE => self.hram[(address - 0xFF80) as usize] = byte,
             0xFFFF => self.ie_register = byte,
         }
+        self.tick_m_cycle();
     }
 
     fn read_io(&self, address: u16) -> u8 {
         match address {
             0xFF00 => self.joypad.read(),
+            0xFF01 => self.io[0x01], // SB - serial transfer data
+            0xFF02 => self.io[0x02], // SC - serial transfer control
             0xFF04..=0xFF07 => self.timer.read(address),
             0xFF0F => self.if_register,
             0xFF40 => self.ppu.lcdc,
@@ -88,6 +108,19 @@ impl MemoryBus {
     fn write_io(&mut self, address: u16, byte: u8) {
         match address {
             0xFF00 => self.joypad.write(byte),
+            0xFF01 => self.io[0x01] = byte, // SB - serial transfer data
+            0xFF02 => {
+                self.io[0x02] = byte;
+                // If transfer requested (bit 7) with internal clock (bit 0)
+                if byte & 0x81 == 0x81 {
+                    let outgoing = self.io[0x01];
+                    eprint!("{}", outgoing as char);
+                    // No link partner: receive 0xFF, complete immediately
+                    self.io[0x01] = 0xFF;
+                    self.io[0x02] &= 0x7F; // clear bit 7 (transfer complete)
+                    self.if_register |= 0x08; // request serial interrupt (bit 3)
+                }
+            }
             0xFF04..=0xFF07 => self.timer.write(address, byte),
             0xFF0F => self.if_register = byte,
             0xFF40 => self.ppu.lcdc = byte,
@@ -109,7 +142,7 @@ impl MemoryBus {
     fn oam_dma(&mut self, byte: u8) {
         let base = (byte as u16) << 8;
         for i in 0..0xA0u16 {
-            let val = self.read_byte(base + i);
+            let val = self.read_byte_no_tick(base + i);
             self.oam[i as usize] = val;
         }
     }
