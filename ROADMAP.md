@@ -8,9 +8,9 @@
 - [x] 1.5 — Pass Blargg's mem_timing test ROM
 
 ## Phase 2: MBC Support
-- [ ] 2.1 — MBC1 (most common — Zelda, Metroid, Mega Man, etc.)
-- [ ] 2.2 — MBC3 + RTC (Pokemon Gold/Silver)
-- [ ] 2.3 — MBC5 (Pokemon Red/Blue JP rev, many later titles)
+- [x] 2.1 — MBC1 (most common — Zelda, Metroid, Mega Man, etc.)
+- [x] 2.2 — MBC3 + RTC (Pokemon Gold/Silver)
+- [x] 2.3 — MBC5 (Pokemon Red/Blue JP rev, many later titles)
 
 ## Phase 3: Sound
 - [ ] 3.1 — APU framework + channel 1 (square wave with sweep)

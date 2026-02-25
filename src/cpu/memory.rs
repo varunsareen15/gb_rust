@@ -49,7 +49,7 @@ impl MemoryBus {
         match address {
             0x0000..=0x7FFF => self.cartridge.read_byte(address),
             0x8000..=0x9FFF => self.vram[(address - 0x8000) as usize],
-            0xA000..=0xBFFF => 0xFF,
+            0xA000..=0xBFFF => self.cartridge.read_byte(address),
             0xC000..=0xDFFF => self.wram[(address - 0xC000) as usize],
             0xE000..=0xFDFF => self.wram[(address - 0xE000) as usize],
             0xFE00..=0xFE9F => self.oam[(address - 0xFE00) as usize],
@@ -68,9 +68,9 @@ impl MemoryBus {
 
     pub fn write_byte(&mut self, address: u16, byte: u8) {
         match address {
-            0x0000..=0x7FFF => { /* ROM: read-only for MBC0 */ }
+            0x0000..=0x7FFF => self.cartridge.write_byte(address, byte),
             0x8000..=0x9FFF => self.vram[(address - 0x8000) as usize] = byte,
-            0xA000..=0xBFFF => { /* No external RAM for MBC0 */ }
+            0xA000..=0xBFFF => self.cartridge.write_byte(address, byte),
             0xC000..=0xDFFF => self.wram[(address - 0xC000) as usize] = byte,
             0xE000..=0xFDFF => self.wram[(address - 0xE000) as usize] = byte,
             0xFE00..=0xFE9F => self.oam[(address - 0xFE00) as usize] = byte,
