@@ -35,7 +35,7 @@
 - [ ] Gamepad support (gilrs — d-pad, analog stick, standard button mapping)
 
 ## Phase 6: Debug Tools
-- [ ] 6.1 — Headless mode (run without window, for testing)
+- [x] 6.1 — Headless mode (run without window, for testing)
 - [ ] 6.2 — Tile map / VRAM viewer
 - [ ] 6.3 — OAM / sprite viewer
 - [ ] 6.4 — Register inspector + breakpoints

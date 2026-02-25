@@ -8,6 +8,7 @@ mod savestate;
 mod apu;
 mod filters;
 mod config;
+mod debug;
 
 use cartridge::Cartridge;
 use gameboy::GameBoy;
@@ -160,6 +161,7 @@ fn run_windowed(gb: &mut GameBoy, config: &config::Config) {
     // FPS tracking
     let mut frame_count: u32 = 0;
     let mut fps_timer = Instant::now();
+    #[allow(unused_assignments)]
     let mut fps_display: f64 = 0.0;
 
     // Speed mode
@@ -167,11 +169,17 @@ fn run_windowed(gb: &mut GameBoy, config: &config::Config) {
     let mut was_paused = false;
     let mut ff_locked = false; // Shift+Tab toggle for persistent fast-forward
 
+    // Debug windows
+    let mut debug = debug::DebugWindows::new();
+
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let frame_start = Instant::now();
 
         // Handle input
         update_joypad(&window, gb, &joypad_map);
+
+        // Debug window toggles (F1/F2/F3)
+        debug.handle_toggles(&window);
 
         // Speed controls
         let shift_held = window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
@@ -232,7 +240,20 @@ fn run_windowed(gb: &mut GameBoy, config: &config::Config) {
         };
 
         if run_frame {
-            gb.run_frame();
+            // Check if we have breakpoints to watch
+            let has_breakpoints = debug.breakpoints()
+                .map_or(false, |bps| !bps.is_empty());
+
+            if has_breakpoints {
+                let bps = debug.breakpoints().unwrap().clone();
+                let hit = gb.run_frame_with_breakpoints(&bps);
+                if hit {
+                    speed_mode = SpeedMode::Paused;
+                    eprintln!("Breakpoint hit at ${:04X}", gb.cpu.pc);
+                }
+            } else {
+                gb.run_frame();
+            }
 
             if speed_mode == SpeedMode::FastForward {
                 // Mute audio during fast-forward: discard samples
@@ -265,6 +286,19 @@ fn run_windowed(gb: &mut GameBoy, config: &config::Config) {
         }
 
         window.update_with_buffer(&buffer, 320, 288).unwrap();
+
+        // Update debug windows
+        let debug_action = debug.update(gb, palette);
+        match debug_action {
+            Some(debug::DebugAction::Step) => {
+                gb.run_step();
+                speed_mode = SpeedMode::Paused;
+            }
+            Some(debug::DebugAction::BreakpointHit) => {
+                speed_mode = SpeedMode::Paused;
+            }
+            None => {}
+        }
 
         // FPS counter
         frame_count += 1;

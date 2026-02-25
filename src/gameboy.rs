@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use crate::cpu::CPU;
 use crate::cartridge::Cartridge;
 use crate::savestate;
@@ -49,6 +50,53 @@ impl GameBoy {
 
             cycles_this_frame += cycles as u32;
         }
+    }
+
+    /// Execute a single CPU instruction + tick timer/PPU/joypad.
+    pub fn run_step(&mut self) -> u8 {
+        self.cpu.bus.cycles_ticked = 0;
+        let cycles = self.cpu.step();
+
+        let remaining = cycles.saturating_sub(self.cpu.bus.cycles_ticked);
+        if remaining > 0 {
+            self.cpu.bus.timer.tick(remaining, &mut self.cpu.bus.apu);
+            if self.cpu.bus.timer.interrupt {
+                self.cpu.bus.if_register |= 0x04;
+                self.cpu.bus.timer.interrupt = false;
+            }
+        }
+
+        let vram_copy = self.cpu.bus.vram;
+        let oam_copy = self.cpu.bus.oam;
+        self.cpu.bus.ppu.tick(cycles, &vram_copy, &oam_copy);
+        if self.cpu.bus.ppu.vblank_interrupt {
+            self.cpu.bus.if_register |= 0x01;
+        }
+        if self.cpu.bus.ppu.stat_interrupt {
+            self.cpu.bus.if_register |= 0x02;
+        }
+
+        if self.cpu.bus.joypad.interrupt {
+            self.cpu.bus.if_register |= 0x10;
+            self.cpu.bus.joypad.interrupt = false;
+        }
+
+        cycles
+    }
+
+    /// Run a frame, checking PC against breakpoints after each step.
+    /// Returns true if a breakpoint was hit (frame not fully completed).
+    pub fn run_frame_with_breakpoints(&mut self, breakpoints: &HashSet<u16>) -> bool {
+        let mut cycles_this_frame: u32 = 0;
+        while cycles_this_frame < CYCLES_PER_FRAME {
+            let cycles = self.run_step();
+            cycles_this_frame += cycles as u32;
+
+            if breakpoints.contains(&self.cpu.pc) {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn framebuffer(&self) -> &[u8; 160 * 144] {

@@ -48,7 +48,7 @@ impl MemoryBus {
         self.cycles_ticked += 4;
     }
 
-    fn read_byte_no_tick(&self, address: u16) -> u8 {
+    pub fn read_byte_no_tick(&self, address: u16) -> u8 {
         match address {
             0x0000..=0x7FFF => self.cartridge.read_byte(address),
             0x8000..=0x9FFF => self.vram[(address - 0x8000) as usize],
