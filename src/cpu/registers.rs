@@ -96,6 +96,32 @@ impl Default for FlagsRegister {
     }
 }
 
+impl Registers {
+    pub fn save_state(&self, buf: &mut Vec<u8>) {
+        use crate::savestate::*;
+        write_u8(buf, self.a);
+        write_u8(buf, self.b);
+        write_u8(buf, self.c);
+        write_u8(buf, self.d);
+        write_u8(buf, self.e);
+        write_u8(buf, u8::from(self.f.clone()));
+        write_u8(buf, self.h);
+        write_u8(buf, self.l);
+    }
+
+    pub fn load_state(&mut self, data: &[u8], cursor: &mut usize) {
+        use crate::savestate::*;
+        self.a = read_u8(data, cursor);
+        self.b = read_u8(data, cursor);
+        self.c = read_u8(data, cursor);
+        self.d = read_u8(data, cursor);
+        self.e = read_u8(data, cursor);
+        self.f = FlagsRegister::from(read_u8(data, cursor));
+        self.h = read_u8(data, cursor);
+        self.l = read_u8(data, cursor);
+    }
+}
+
 impl Default for Registers {
     fn default() -> Self {
         Registers {

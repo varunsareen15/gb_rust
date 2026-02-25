@@ -148,6 +148,43 @@ impl MemoryBus {
     }
 }
 
+impl MemoryBus {
+    pub fn save_state(&self, buf: &mut Vec<u8>) {
+        use crate::savestate::*;
+        write_bytes(buf, &self.vram);
+        write_bytes(buf, &self.wram);
+        write_bytes(buf, &self.oam);
+        write_bytes(buf, &self.io);
+        write_bytes(buf, &self.hram);
+        write_u8(buf, self.ie_register);
+        write_u8(buf, self.if_register);
+        self.timer.save_state(buf);
+        self.ppu.save_state(buf);
+        self.joypad.save_state(buf);
+        self.cartridge.save_state(buf);
+    }
+
+    pub fn load_state(&mut self, data: &[u8], cursor: &mut usize) {
+        use crate::savestate::*;
+        let vram = read_bytes(data, cursor, 0x2000);
+        self.vram.copy_from_slice(vram);
+        let wram = read_bytes(data, cursor, 0x2000);
+        self.wram.copy_from_slice(wram);
+        let oam = read_bytes(data, cursor, 0xA0);
+        self.oam.copy_from_slice(oam);
+        let io = read_bytes(data, cursor, 0x80);
+        self.io.copy_from_slice(io);
+        let hram = read_bytes(data, cursor, 0x7F);
+        self.hram.copy_from_slice(hram);
+        self.ie_register = read_u8(data, cursor);
+        self.if_register = read_u8(data, cursor);
+        self.timer.load_state(data, cursor);
+        self.ppu.load_state(data, cursor);
+        self.joypad.load_state(data, cursor);
+        self.cartridge.load_state(data, cursor);
+    }
+}
+
 impl Default for MemoryBus {
     fn default() -> Self {
         MemoryBus::new(Cartridge::default())

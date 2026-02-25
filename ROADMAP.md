@@ -20,8 +20,8 @@
 - [ ] 3.5 — Mixer + audio output (cpal or rodio)
 
 ## Phase 4: Persistence
-- [ ] 4.1 — Battery saves (persist external RAM to .sav file)
-- [ ] 4.2 — Save states (serialize full emulator state)
+- [x] 4.1 — Battery saves (persist external RAM to .sav file)
+- [x] 4.2 — Save states (serialize full emulator state)
 
 ## Phase 5: Quality of Life
 - [ ] 5.1 — Speed controls (fast-forward, slow-motion, frame step)

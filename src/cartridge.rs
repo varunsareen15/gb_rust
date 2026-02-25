@@ -95,6 +95,48 @@ impl Rtc {
         }
     }
 
+    fn to_bytes(&self) -> [u8; 48] {
+        let mut buf = [0u8; 48];
+        // Current registers (5 x u32 LE)
+        buf[0..4].copy_from_slice(&(self.seconds as u32).to_le_bytes());
+        buf[4..8].copy_from_slice(&(self.minutes as u32).to_le_bytes());
+        buf[8..12].copy_from_slice(&(self.hours as u32).to_le_bytes());
+        buf[12..16].copy_from_slice(&(self.days_low as u32).to_le_bytes());
+        buf[16..20].copy_from_slice(&(self.days_high as u32).to_le_bytes());
+        // Latched registers (5 x u32 LE)
+        buf[20..24].copy_from_slice(&(self.latched[0] as u32).to_le_bytes());
+        buf[24..28].copy_from_slice(&(self.latched[1] as u32).to_le_bytes());
+        buf[28..32].copy_from_slice(&(self.latched[2] as u32).to_le_bytes());
+        buf[32..36].copy_from_slice(&(self.latched[3] as u32).to_le_bytes());
+        buf[36..40].copy_from_slice(&(self.latched[4] as u32).to_le_bytes());
+        // Base timestamp (u64 LE)
+        buf[40..48].copy_from_slice(&self.base_timestamp.to_le_bytes());
+        buf
+    }
+
+    fn from_bytes(data: &[u8]) -> Self {
+        let read_u32 = |offset: usize| -> u32 {
+            u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]])
+        };
+        let seconds = read_u32(0) as u8;
+        let minutes = read_u32(4) as u8;
+        let hours = read_u32(8) as u8;
+        let days_low = read_u32(12) as u8;
+        let days_high = read_u32(16) as u8;
+        let latched = [
+            read_u32(20) as u8,
+            read_u32(24) as u8,
+            read_u32(28) as u8,
+            read_u32(32) as u8,
+            read_u32(36) as u8,
+        ];
+        let base_timestamp = u64::from_le_bytes([
+            data[40], data[41], data[42], data[43],
+            data[44], data[45], data[46], data[47],
+        ]);
+        Rtc { seconds, minutes, hours, days_low, days_high, latched, base_timestamp }
+    }
+
     fn write(&mut self, reg: u8, value: u8) {
         // When writing RTC registers, update stored values and reset base_timestamp
         match reg {
@@ -123,6 +165,8 @@ pub struct Cartridge {
     pub title: String,
     pub cartridge_type: u8,
     mbc: Mbc,
+    has_battery: bool,
+    rom_path: Option<String>,
 }
 
 fn ram_size_from_code(code: u8) -> usize {
@@ -135,6 +179,17 @@ fn ram_size_from_code(code: u8) -> usize {
         0x05 => 64 * 1024,
         _ => 0,
     }
+}
+
+fn has_battery(cartridge_type: u8) -> bool {
+    matches!(cartridge_type, 0x03 | 0x06 | 0x09 | 0x0D | 0x0F | 0x10 | 0x13 | 0x1B | 0x1E)
+}
+
+fn sav_path(rom_path: &str) -> std::path::PathBuf {
+    let path = Path::new(rom_path);
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    parent.join("saves").join(stem.as_ref()).join(format!("{}.sav", stem))
 }
 
 fn mbc_from_type(cartridge_type: u8) -> Mbc {
@@ -164,6 +219,7 @@ fn mbc_from_type(cartridge_type: u8) -> Mbc {
 
 impl Cartridge {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Cartridge, String> {
+        let rom_path_str = path.as_ref().to_string_lossy().into_owned();
         let data = fs::read(path).map_err(|e| format!("Failed to read ROM: {}", e))?;
         if data.len() < 0x150 {
             return Err("ROM too small to contain header".to_string());
@@ -177,15 +233,69 @@ impl Cartridge {
         let cartridge_type = data[0x0147];
         let ram_code = data[0x0149];
         let ram_size = ram_size_from_code(ram_code);
-        let mbc = mbc_from_type(cartridge_type);
+        let mut mbc = mbc_from_type(cartridge_type);
+        let battery = has_battery(cartridge_type);
+
+        let mut ram = vec![0u8; ram_size];
+
+        // Load .sav file if battery-backed
+        if battery {
+            let sav = sav_path(&rom_path_str);
+            if sav.exists() {
+                if let Ok(sav_data) = fs::read(&sav) {
+                    let copy_len = sav_data.len().min(ram.len());
+                    ram[..copy_len].copy_from_slice(&sav_data[..copy_len]);
+
+                    // MBC3: restore RTC from 48 bytes after RAM
+                    if sav_data.len() >= ram.len() + 48 {
+                        if let Mbc::Mbc3 { ref mut rtc, .. } = mbc {
+                            *rtc = Rtc::from_bytes(&sav_data[ram.len()..ram.len() + 48]);
+                        }
+                    }
+
+                    eprintln!("Loaded save from {}", sav.display());
+                }
+            }
+        }
 
         Ok(Cartridge {
             rom: data,
-            ram: vec![0; ram_size],
+            ram,
             title,
             cartridge_type,
             mbc,
+            has_battery: battery,
+            rom_path: Some(rom_path_str),
         })
+    }
+
+    pub fn save(&self) -> Result<(), String> {
+        let rom_path = match &self.rom_path {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+        if !self.has_battery {
+            return Ok(());
+        }
+        if self.ram.is_empty() && !matches!(self.mbc, Mbc::Mbc3 { .. }) {
+            return Ok(());
+        }
+
+        let sav = sav_path(rom_path);
+        if let Some(parent) = sav.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create save directory: {}", e))?;
+        }
+
+        let mut data = self.ram.clone();
+
+        // MBC3: append 48 bytes of RTC state
+        if let Mbc::Mbc3 { ref rtc, .. } = self.mbc {
+            data.extend_from_slice(&rtc.to_bytes());
+        }
+
+        fs::write(&sav, &data).map_err(|e| format!("Failed to write save: {}", e))?;
+        eprintln!("Saved to {}", sav.display());
+        Ok(())
     }
 
     fn num_rom_banks(&self) -> usize {
@@ -390,6 +500,83 @@ impl Cartridge {
     }
 }
 
+impl Cartridge {
+    pub fn mbc_type_tag(&self) -> u8 {
+        match &self.mbc {
+            Mbc::NoMbc => 0,
+            Mbc::Mbc1 { .. } => 1,
+            Mbc::Mbc3 { .. } => 3,
+            Mbc::Mbc5 { .. } => 5,
+        }
+    }
+
+    pub fn ram_len(&self) -> usize {
+        self.ram.len()
+    }
+
+    pub fn rom_path(&self) -> Option<&str> {
+        self.rom_path.as_deref()
+    }
+
+    pub fn save_state(&self, buf: &mut Vec<u8>) {
+        use crate::savestate::*;
+        // RAM
+        write_bytes(buf, &self.ram);
+        // MBC state
+        match &self.mbc {
+            Mbc::NoMbc => {}
+            Mbc::Mbc1 { rom_bank, ram_bank, ram_enabled, banking_mode } => {
+                write_u8(buf, *rom_bank);
+                write_u8(buf, *ram_bank);
+                write_bool(buf, *ram_enabled);
+                write_bool(buf, *banking_mode);
+            }
+            Mbc::Mbc3 { rom_bank, ram_bank, ram_enabled, rtc, rtc_latch } => {
+                write_u8(buf, *rom_bank);
+                write_u8(buf, *ram_bank);
+                write_bool(buf, *ram_enabled);
+                write_bytes(buf, &rtc.to_bytes());
+                write_u8(buf, *rtc_latch);
+            }
+            Mbc::Mbc5 { rom_bank, ram_bank, ram_enabled } => {
+                write_u16_le(buf, *rom_bank);
+                write_u8(buf, *ram_bank);
+                write_bool(buf, *ram_enabled);
+            }
+        }
+    }
+
+    pub fn load_state(&mut self, data: &[u8], cursor: &mut usize) {
+        use crate::savestate::*;
+        // RAM
+        let ram = read_bytes(data, cursor, self.ram.len());
+        self.ram.copy_from_slice(ram);
+        // MBC state
+        match &mut self.mbc {
+            Mbc::NoMbc => {}
+            Mbc::Mbc1 { rom_bank, ram_bank, ram_enabled, banking_mode } => {
+                *rom_bank = read_u8(data, cursor);
+                *ram_bank = read_u8(data, cursor);
+                *ram_enabled = read_bool(data, cursor);
+                *banking_mode = read_bool(data, cursor);
+            }
+            Mbc::Mbc3 { rom_bank, ram_bank, ram_enabled, rtc, rtc_latch } => {
+                *rom_bank = read_u8(data, cursor);
+                *ram_bank = read_u8(data, cursor);
+                *ram_enabled = read_bool(data, cursor);
+                let rtc_data = read_bytes(data, cursor, 48);
+                *rtc = Rtc::from_bytes(rtc_data);
+                *rtc_latch = read_u8(data, cursor);
+            }
+            Mbc::Mbc5 { rom_bank, ram_bank, ram_enabled } => {
+                *rom_bank = read_u16_le(data, cursor);
+                *ram_bank = read_u8(data, cursor);
+                *ram_enabled = read_bool(data, cursor);
+            }
+        }
+    }
+}
+
 impl Default for Cartridge {
     fn default() -> Self {
         Cartridge {
@@ -398,6 +585,8 @@ impl Default for Cartridge {
             title: String::new(),
             cartridge_type: 0,
             mbc: Mbc::NoMbc,
+            has_battery: false,
+            rom_path: None,
         }
     }
 }

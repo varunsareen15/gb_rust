@@ -266,6 +266,60 @@ impl Ppu {
     }
 }
 
+impl Ppu {
+    pub fn save_state(&self, buf: &mut Vec<u8>) {
+        use crate::savestate::*;
+        write_bytes(buf, &self.framebuffer);
+        let mode_byte = match self.mode {
+            PpuMode::HBlank => 0u8,
+            PpuMode::VBlank => 1,
+            PpuMode::OamScan => 2,
+            PpuMode::Drawing => 3,
+        };
+        write_u8(buf, mode_byte);
+        write_u32_le(buf, self.mode_clock);
+        write_u8(buf, self.ly);
+        write_u8(buf, self.lyc);
+        write_u8(buf, self.lcdc);
+        write_u8(buf, self.stat);
+        write_u8(buf, self.scy);
+        write_u8(buf, self.scx);
+        write_u8(buf, self.bgp);
+        write_u8(buf, self.wy);
+        write_u8(buf, self.wx);
+        write_u8(buf, self.obp0);
+        write_u8(buf, self.obp1);
+        write_bool(buf, self.vblank_interrupt);
+        write_bool(buf, self.stat_interrupt);
+    }
+
+    pub fn load_state(&mut self, data: &[u8], cursor: &mut usize) {
+        use crate::savestate::*;
+        let fb = read_bytes(data, cursor, 160 * 144);
+        self.framebuffer.copy_from_slice(fb);
+        self.mode = match read_u8(data, cursor) {
+            0 => PpuMode::HBlank,
+            1 => PpuMode::VBlank,
+            2 => PpuMode::OamScan,
+            _ => PpuMode::Drawing,
+        };
+        self.mode_clock = read_u32_le(data, cursor);
+        self.ly = read_u8(data, cursor);
+        self.lyc = read_u8(data, cursor);
+        self.lcdc = read_u8(data, cursor);
+        self.stat = read_u8(data, cursor);
+        self.scy = read_u8(data, cursor);
+        self.scx = read_u8(data, cursor);
+        self.bgp = read_u8(data, cursor);
+        self.wy = read_u8(data, cursor);
+        self.wx = read_u8(data, cursor);
+        self.obp0 = read_u8(data, cursor);
+        self.obp1 = read_u8(data, cursor);
+        self.vblank_interrupt = read_bool(data, cursor);
+        self.stat_interrupt = read_bool(data, cursor);
+    }
+}
+
 impl Default for Ppu {
     fn default() -> Self {
         Ppu {

@@ -61,6 +61,26 @@ impl Timer {
     }
 }
 
+impl Timer {
+    pub fn save_state(&self, buf: &mut Vec<u8>) {
+        use crate::savestate::*;
+        write_u8(buf, self.tima);
+        write_u8(buf, self.tma);
+        write_u8(buf, self.tac);
+        write_u16_le(buf, self.internal_counter);
+        write_bool(buf, self.interrupt);
+    }
+
+    pub fn load_state(&mut self, data: &[u8], cursor: &mut usize) {
+        use crate::savestate::*;
+        self.tima = read_u8(data, cursor);
+        self.tma = read_u8(data, cursor);
+        self.tac = read_u8(data, cursor);
+        self.internal_counter = read_u16_le(data, cursor);
+        self.interrupt = read_bool(data, cursor);
+    }
+}
+
 impl Default for Timer {
     fn default() -> Self {
         Timer {

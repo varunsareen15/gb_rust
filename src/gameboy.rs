@@ -1,5 +1,6 @@
 use crate::cpu::CPU;
 use crate::cartridge::Cartridge;
+use crate::savestate;
 
 pub const CYCLES_PER_FRAME: u32 = 70224;
 
@@ -52,5 +53,24 @@ impl GameBoy {
 
     pub fn framebuffer(&self) -> &[u8; 160 * 144] {
         &self.cpu.bus.ppu.framebuffer
+    }
+
+    pub fn save_state_to_slot(&self, slot: u8) -> Result<(), String> {
+        let rom_path = self.cpu.bus.cartridge.rom_path()
+            .ok_or_else(|| "No ROM path available".to_string())?;
+        let path = savestate::save_state_path(rom_path, slot);
+        savestate::save_to_file(self, &path)?;
+        eprintln!("State saved to {}", path.display());
+        Ok(())
+    }
+
+    pub fn load_state_from_slot(&mut self, slot: u8) -> Result<(), String> {
+        let rom_path = self.cpu.bus.cartridge.rom_path()
+            .ok_or_else(|| "No ROM path available".to_string())?
+            .to_string();
+        let path = savestate::save_state_path(&rom_path, slot);
+        savestate::load_from_file(self, &path)?;
+        eprintln!("State loaded from {}", path.display());
+        Ok(())
     }
 }

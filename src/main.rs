@@ -4,6 +4,7 @@ mod timer;
 mod ppu;
 mod joypad;
 mod gameboy;
+mod savestate;
 
 use cartridge::Cartridge;
 use gameboy::GameBoy;
@@ -44,6 +45,10 @@ fn main() {
     } else {
         run_windowed(&mut gb);
     }
+
+    if let Err(e) = gb.cpu.bus.cartridge.save() {
+        eprintln!("Error saving: {}", e);
+    }
 }
 
 fn run_headless(gb: &mut GameBoy) {
@@ -73,6 +78,18 @@ fn run_windowed(gb: &mut GameBoy) {
 
         // Handle input
         update_joypad(&window, gb);
+
+        // Save states
+        if window.is_key_pressed(Key::F5, minifb::KeyRepeat::No) {
+            if let Err(e) = gb.save_state_to_slot(0) {
+                eprintln!("Save state error: {}", e);
+            }
+        }
+        if window.is_key_pressed(Key::F8, minifb::KeyRepeat::No) {
+            if let Err(e) = gb.load_state_from_slot(0) {
+                eprintln!("Load state error: {}", e);
+            }
+        }
 
         // Run one frame
         gb.run_frame();

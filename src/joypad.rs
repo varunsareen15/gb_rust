@@ -55,6 +55,24 @@ pub enum JoypadKey {
     A, B, Select, Start,
 }
 
+impl Joypad {
+    pub fn save_state(&self, buf: &mut Vec<u8>) {
+        use crate::savestate::*;
+        write_u8(buf, self.select);
+        write_u8(buf, self.buttons);
+        write_u8(buf, self.dpad);
+        write_bool(buf, self.interrupt);
+    }
+
+    pub fn load_state(&mut self, data: &[u8], cursor: &mut usize) {
+        use crate::savestate::*;
+        self.select = read_u8(data, cursor);
+        self.buttons = read_u8(data, cursor);
+        self.dpad = read_u8(data, cursor);
+        self.interrupt = read_bool(data, cursor);
+    }
+}
+
 impl Default for Joypad {
     fn default() -> Self {
         Joypad {

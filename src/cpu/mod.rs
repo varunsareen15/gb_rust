@@ -42,6 +42,32 @@ impl CPU {
         cpu
     }
 
+    pub fn save_state(&self, buf: &mut Vec<u8>) {
+        use crate::savestate::*;
+        self.registers.save_state(buf);
+        write_u16_le(buf, self.pc);
+        write_u16_le(buf, self.sp);
+        let flags: u8 = (if self.ime { 1 } else { 0 })
+            | (if self.halted { 1 } else { 0 }) << 1
+            | (if self.ei_pending { 1 } else { 0 }) << 2
+            | (if self.halt_bug { 1 } else { 0 }) << 3;
+        write_u8(buf, flags);
+        self.bus.save_state(buf);
+    }
+
+    pub fn load_state(&mut self, data: &[u8], cursor: &mut usize) {
+        use crate::savestate::*;
+        self.registers.load_state(data, cursor);
+        self.pc = read_u16_le(data, cursor);
+        self.sp = read_u16_le(data, cursor);
+        let flags = read_u8(data, cursor);
+        self.ime = flags & 0x01 != 0;
+        self.halted = flags & 0x02 != 0;
+        self.ei_pending = flags & 0x04 != 0;
+        self.halt_bug = flags & 0x08 != 0;
+        self.bus.load_state(data, cursor);
+    }
+
     pub fn step(&mut self) -> u8 {
         let interrupt_cycles = self.handle_interrupts();
         if interrupt_cycles > 0 {
