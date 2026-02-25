@@ -5,6 +5,7 @@ mod ppu;
 mod joypad;
 mod gameboy;
 mod savestate;
+mod apu;
 
 use cartridge::Cartridge;
 use gameboy::GameBoy;
@@ -12,6 +13,8 @@ use joypad::JoypadKey;
 
 use minifb::{Key, Window, WindowOptions, Scale};
 use std::time::{Duration, Instant};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 const GB_COLORS: [u32; 4] = [
     0x00E0F8D0, // lightest (white)
@@ -52,10 +55,16 @@ fn main() {
 }
 
 fn run_headless(gb: &mut GameBoy) {
+    // No audio output in headless mode
+    gb.cpu.bus.apu.set_sample_rate(0);
+
     // Run for up to ~60 seconds of emulated time (~3600 frames)
     // Stop early if Blargg memory-mapped result is available
     for _ in 0..3600 {
         gb.run_frame();
+        // Clear sample buffer periodically (no audio output)
+        gb.cpu.bus.apu.sample_buffer.clear();
+
         // Check for Blargg memory-mapped result signature at $A001-$A003
         let sig = [
             gb.cpu.bus.cartridge.read_byte(0xA001),
@@ -106,6 +115,10 @@ fn run_headless(gb: &mut GameBoy) {
 }
 
 fn run_windowed(gb: &mut GameBoy) {
+    // Set up audio output via cpal
+    let audio_buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let _stream = setup_audio(gb, &audio_buffer);
+
     let mut window = Window::new(
         "GB Emulator",
         160,
@@ -140,6 +153,9 @@ fn run_windowed(gb: &mut GameBoy) {
         // Run one frame
         gb.run_frame();
 
+        // Drain APU samples into audio buffer
+        drain_audio_samples(gb, &audio_buffer);
+
         // Convert framebuffer to u32 colors
         let fb = gb.framebuffer();
         for (i, &pixel) in fb.iter().enumerate() {
@@ -148,10 +164,94 @@ fn run_windowed(gb: &mut GameBoy) {
 
         window.update_with_buffer(&buffer, 160, 144).unwrap();
 
-        // Frame timing
+        // Frame timing: sleep most of the wait, then spin-wait for precision
         let elapsed = frame_start.elapsed();
         if elapsed < frame_duration {
-            std::thread::sleep(frame_duration - elapsed);
+            let remaining = frame_duration - elapsed;
+            if remaining > Duration::from_millis(1) {
+                std::thread::sleep(remaining - Duration::from_millis(1));
+            }
+            while frame_start.elapsed() < frame_duration {
+                std::hint::spin_loop();
+            }
+        }
+    }
+}
+
+fn setup_audio(gb: &mut GameBoy, audio_buffer: &Arc<Mutex<VecDeque<f32>>>) -> Option<cpal::Stream> {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+    let host = cpal::default_host();
+    let device = match host.default_output_device() {
+        Some(d) => d,
+        None => {
+            eprintln!("No audio output device found");
+            return None;
+        }
+    };
+
+    let config = match device.default_output_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to get audio config: {}", e);
+            return None;
+        }
+    };
+
+    let sample_rate = config.sample_rate().0;
+    gb.cpu.bus.apu.set_sample_rate(sample_rate);
+
+    let buffer_clone = audio_buffer.clone();
+    let last_sample: Arc<Mutex<f32>> = Arc::new(Mutex::new(0.0));
+    let last_sample_clone = last_sample.clone();
+    let stream = device.build_output_stream(
+        &config.into(),
+        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            let mut buffer = buffer_clone.lock().unwrap();
+            let drain_count = data.len().min(buffer.len());
+            for i in 0..drain_count {
+                data[i] = buffer.pop_front().unwrap();
+            }
+            // On underrun, hold last sample to avoid pops
+            let hold = if drain_count > 0 {
+                let v = data[drain_count - 1];
+                *last_sample_clone.lock().unwrap() = v;
+                v
+            } else {
+                *last_sample_clone.lock().unwrap()
+            };
+            for sample in data[drain_count..].iter_mut() {
+                *sample = hold;
+            }
+        },
+        |err| eprintln!("Audio stream error: {}", err),
+        None,
+    );
+
+    match stream {
+        Ok(s) => {
+            if let Err(e) = s.play() {
+                eprintln!("Failed to start audio: {}", e);
+                return None;
+            }
+            Some(s)
+        }
+        Err(e) => {
+            eprintln!("Failed to build audio stream: {}", e);
+            None
+        }
+    }
+}
+
+fn drain_audio_samples(gb: &mut GameBoy, audio_buffer: &Arc<Mutex<VecDeque<f32>>>) {
+    if let Ok(mut buffer) = audio_buffer.lock() {
+        buffer.extend(gb.cpu.bus.apu.sample_buffer.drain(..));
+        // Cap at ~4 frames of audio to prevent latency buildup
+        let sample_rate = gb.cpu.bus.apu.sample_rate as usize;
+        let max_samples = (sample_rate * 2 * 4) / 60; // stereo, 4 frames
+        if buffer.len() > max_samples {
+            let excess = buffer.len() - max_samples;
+            drop(buffer.drain(..excess));
         }
     }
 }

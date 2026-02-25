@@ -13,11 +13,11 @@
 - [x] 2.3 — MBC5 (Pokemon Red/Blue JP rev, many later titles)
 
 ## Phase 3: Sound
-- [ ] 3.1 — APU framework + channel 1 (square wave with sweep)
-- [ ] 3.2 — Channel 2 (square wave, no sweep)
-- [ ] 3.3 — Channel 3 (wave)
-- [ ] 3.4 — Channel 4 (noise)
-- [ ] 3.5 — Mixer + audio output (cpal or rodio)
+- [x] 3.1 — APU framework + channel 1 (square wave with sweep)
+- [x] 3.2 — Channel 2 (square wave, no sweep)
+- [x] 3.3 — Channel 3 (wave)
+- [x] 3.4 — Channel 4 (noise)
+- [x] 3.5 — Mixer + audio output (cpal or rodio)
 
 ## Phase 4: Persistence
 - [x] 4.1 — Battery saves (persist external RAM to .sav file)

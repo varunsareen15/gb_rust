@@ -23,7 +23,7 @@ impl GameBoy {
             // Tick timer for remaining cycles not already ticked during bus accesses
             let remaining = cycles.saturating_sub(self.cpu.bus.cycles_ticked);
             if remaining > 0 {
-                self.cpu.bus.timer.tick(remaining);
+                self.cpu.bus.timer.tick(remaining, &mut self.cpu.bus.apu);
                 if self.cpu.bus.timer.interrupt {
                     self.cpu.bus.if_register |= 0x04;
                     self.cpu.bus.timer.interrupt = false;

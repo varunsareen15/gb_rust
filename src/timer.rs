@@ -1,8 +1,10 @@
+use crate::apu::Apu;
+
 pub struct Timer {
     pub tima: u8,
     pub tma: u8,
     pub tac: u8,
-    internal_counter: u16,
+    pub internal_counter: u16,
     pub interrupt: bool,
 }
 
@@ -17,9 +19,17 @@ impl Timer {
         }
     }
 
-    pub fn write(&mut self, address: u16, byte: u8) {
+    pub fn write(&mut self, address: u16, byte: u8, apu: &mut Apu) {
         match address {
-            0xFF04 => self.internal_counter = 0,
+            0xFF04 => {
+                // DIV reset: detect falling edge of bit 12 before clearing
+                let old_bit12 = (self.internal_counter >> 12) & 1;
+                self.internal_counter = 0;
+                // If bit 12 was high, resetting causes a falling edge
+                if old_bit12 == 1 {
+                    apu.clock_frame_sequencer();
+                }
+            }
             0xFF05 => self.tima = byte,
             0xFF06 => self.tma = byte,
             0xFF07 => self.tac = byte,
@@ -27,14 +37,25 @@ impl Timer {
         }
     }
 
-    pub fn tick(&mut self, t_cycles: u8) {
+    pub fn tick(&mut self, t_cycles: u8, apu: &mut Apu) {
         self.interrupt = false;
-        let m_cycles = t_cycles as u16;
+        let cycles = t_cycles as u16;
 
-        for _ in 0..m_cycles {
+        for _ in 0..cycles {
             let old_counter = self.internal_counter;
             self.internal_counter = self.internal_counter.wrapping_add(1);
 
+            // Detect falling edge of bit 12 for APU frame sequencer (512 Hz)
+            let old_bit12 = (old_counter >> 12) & 1;
+            let new_bit12 = (self.internal_counter >> 12) & 1;
+            if old_bit12 == 1 && new_bit12 == 0 {
+                apu.clock_frame_sequencer();
+            }
+
+            // Tick APU one T-cycle (advance channel frequency timers + samples)
+            apu.tick_one_t_cycle();
+
+            // Timer (TIMA) falling edge detection
             if self.tac & 0x04 != 0 {
                 let bit = match self.tac & 0x03 {
                     0 => 9,  // 4096 Hz

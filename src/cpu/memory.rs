@@ -2,6 +2,7 @@ use crate::cartridge::Cartridge;
 use crate::timer::Timer;
 use crate::ppu::Ppu;
 use crate::joypad::Joypad;
+use crate::apu::Apu;
 
 pub struct MemoryBus {
     pub cartridge: Cartridge,
@@ -15,6 +16,7 @@ pub struct MemoryBus {
     pub timer: Timer,
     pub ppu: Ppu,
     pub joypad: Joypad,
+    pub apu: Apu,
     pub cycles_ticked: u8,
 }
 
@@ -32,12 +34,13 @@ impl MemoryBus {
             timer: Timer::default(),
             ppu: Ppu::default(),
             joypad: Joypad::default(),
+            apu: Apu::default(),
             cycles_ticked: 0,
         }
     }
 
     fn tick_m_cycle(&mut self) {
-        self.timer.tick(4);
+        self.timer.tick(4, &mut self.apu);
         if self.timer.interrupt {
             self.if_register |= 0x04;
             self.timer.interrupt = false;
@@ -89,6 +92,7 @@ impl MemoryBus {
             0xFF02 => self.io[0x02], // SC - serial transfer control
             0xFF04..=0xFF07 => self.timer.read(address),
             0xFF0F => self.if_register | 0xE0,
+            0xFF10..=0xFF3F => self.apu.read_register(address),
             0xFF40 => self.ppu.lcdc,
             0xFF41 => self.ppu.read_stat(),
             0xFF42 => self.ppu.scy,
@@ -121,8 +125,9 @@ impl MemoryBus {
                     self.if_register |= 0x08; // request serial interrupt (bit 3)
                 }
             }
-            0xFF04..=0xFF07 => self.timer.write(address, byte),
+            0xFF04..=0xFF07 => self.timer.write(address, byte, &mut self.apu),
             0xFF0F => self.if_register = byte,
+            0xFF10..=0xFF3F => self.apu.write_register(address, byte),
             0xFF40 => self.ppu.lcdc = byte,
             0xFF41 => self.ppu.write_stat(byte),
             0xFF42 => self.ppu.scy = byte,
@@ -161,6 +166,7 @@ impl MemoryBus {
         self.timer.save_state(buf);
         self.ppu.save_state(buf);
         self.joypad.save_state(buf);
+        self.apu.save_state(buf);
         self.cartridge.save_state(buf);
     }
 
@@ -181,6 +187,7 @@ impl MemoryBus {
         self.timer.load_state(data, cursor);
         self.ppu.load_state(data, cursor);
         self.joypad.load_state(data, cursor);
+        self.apu.load_state(data, cursor);
         self.cartridge.load_state(data, cursor);
     }
 }
