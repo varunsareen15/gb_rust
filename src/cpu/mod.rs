@@ -89,12 +89,19 @@ impl CPU {
             self.ime = true;
         }
 
-        let pc_before_execute = self.pc;
         let mut instruction_byte = self.bus.read_byte(self.pc);
         let prefixed = instruction_byte == 0xCB;
         if prefixed {
             instruction_byte = self.bus.read_byte(self.pc + 1);
         }
+
+        // HALT bug: PC failed to increment during HALT, so the byte after HALT
+        // is fetched as the opcode but PC still points one behind. This causes
+        // multi-byte instructions to re-read the opcode byte as their first operand.
+        if halt_bug_active {
+            self.pc = self.pc.wrapping_sub(1);
+        }
+
         let (next_pc, cycles) = if let Some(instruction) = Instruction::from_byte(instruction_byte, prefixed) {
             self.execute(instruction)
         } else {
@@ -103,9 +110,6 @@ impl CPU {
         };
 
         self.pc = next_pc;
-        if halt_bug_active {
-            self.pc = pc_before_execute;
-        }
         cycles
     }
 

@@ -88,7 +88,7 @@ impl MemoryBus {
             0xFF01 => self.io[0x01], // SB - serial transfer data
             0xFF02 => self.io[0x02], // SC - serial transfer control
             0xFF04..=0xFF07 => self.timer.read(address),
-            0xFF0F => self.if_register,
+            0xFF0F => self.if_register | 0xE0,
             0xFF40 => self.ppu.lcdc,
             0xFF41 => self.ppu.read_stat(),
             0xFF42 => self.ppu.scy,

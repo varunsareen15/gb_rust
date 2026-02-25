@@ -52,10 +52,56 @@ fn main() {
 }
 
 fn run_headless(gb: &mut GameBoy) {
-    // Run for up to ~30 seconds of emulated time (~1800 frames)
-    for _ in 0..1800 {
+    // Run for up to ~60 seconds of emulated time (~3600 frames)
+    // Stop early if Blargg memory-mapped result is available
+    for _ in 0..3600 {
         gb.run_frame();
+        // Check for Blargg memory-mapped result signature at $A001-$A003
+        let sig = [
+            gb.cpu.bus.cartridge.read_byte(0xA001),
+            gb.cpu.bus.cartridge.read_byte(0xA002),
+            gb.cpu.bus.cartridge.read_byte(0xA003),
+        ];
+        if sig == [0xDE, 0xB0, 0x61] {
+            let status = gb.cpu.bus.cartridge.read_byte(0xA000);
+            if status != 0x80 {
+                // Test finished — print result string from $A004
+                let mut addr = 0xA004u16;
+                loop {
+                    let ch = gb.cpu.bus.cartridge.read_byte(addr);
+                    if ch == 0 { break; }
+                    eprint!("{}", ch as char);
+                    addr += 1;
+                    if addr > 0xBFFF { break; }
+                }
+                eprintln!();
+                break;
+            }
+        }
     }
+
+    // Dump VRAM tile map as ASCII (for screen-only test ROMs like halt_bug)
+    // Blargg uses tiles where tile index maps to ASCII code
+    let tilemap_base = 0x1800usize; // $9800 in VRAM
+    let mut has_text = false;
+    for row in 0..18 {
+        let mut line = String::new();
+        for col in 0..20 {
+            let tile = gb.cpu.bus.vram[tilemap_base + row * 32 + col];
+            if tile >= 0x20 && tile < 0x7F {
+                line.push(tile as char);
+                has_text = true;
+            } else if tile == 0 {
+                line.push(' ');
+            } else {
+                line.push(' ');
+            }
+        }
+        if has_text {
+            eprintln!("{}", line.trim_end());
+        }
+    }
+
     eprintln!();
 }
 
