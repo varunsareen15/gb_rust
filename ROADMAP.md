@@ -24,12 +24,15 @@
 - [x] 4.2 — Save states (serialize full emulator state)
 
 ## Phase 5: Quality of Life
-- [ ] 5.1 — Speed controls (fast-forward, slow-motion, frame step)
-- [ ] 5.2 — FPS counter in title bar
-- [ ] 5.3 — Configurable controls (config file)
-- [ ] 5.4 — Window scaling / fullscreen toggle
-- [ ] 5.5 — Shader/filters (CRT scanlines, DMG green)
-- [ ] 5.6 — Gamepad support (gilrs)
+- [x] 5.1 — Speed controls (fast-forward, pause, frame step, configurable speed)
+- [x] 5.2 — FPS counter in title bar
+- [x] 5.3 — Configurable controls (config file at ~/.config/gb_rust/config.toml)
+- [x] 5.4 — Window scaling (2x/4x/8x via F11)
+- [x] 5.5 — Palettes & scanline filter (P cycles palettes, F10 toggles scanlines)
+
+## Future / Backlog
+- [ ] Fullscreen toggle (needs minifb fix or alternative approach)
+- [ ] Gamepad support (gilrs — d-pad, analog stick, standard button mapping)
 
 ## Phase 6: Debug Tools
 - [ ] 6.1 — Headless mode (run without window, for testing)

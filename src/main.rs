@@ -6,6 +6,8 @@ mod joypad;
 mod gameboy;
 mod savestate;
 mod apu;
+mod filters;
+mod config;
 
 use cartridge::Cartridge;
 use gameboy::GameBoy;
@@ -16,12 +18,32 @@ use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-const GB_COLORS: [u32; 4] = [
-    0x00E0F8D0, // lightest (white)
-    0x0088C070, // light
-    0x00346856, // dark
-    0x00081820, // darkest (black)
+#[derive(PartialEq, Clone, Copy)]
+enum SpeedMode {
+    Normal,
+    FastForward,
+    Paused,
+}
+
+use filters::PALETTES;
+
+const SCALE_STEPS: [(Scale, &str); 3] = [
+    (Scale::X1, "2x"),
+    (Scale::X2, "4x"),
+    (Scale::X4, "8x"),
 ];
+
+fn create_window(scale: Scale) -> Window {
+    Window::new(
+        "GB Emulator",
+        320,
+        288,
+        WindowOptions {
+            scale,
+            ..WindowOptions::default()
+        },
+    ).expect("Failed to create window")
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -46,7 +68,8 @@ fn main() {
     if headless {
         run_headless(&mut gb);
     } else {
-        run_windowed(&mut gb);
+        let config = config::Config::load();
+        run_windowed(&mut gb, &config);
     }
 
     if let Err(e) = gb.cpu.bus.cartridge.save() {
@@ -114,29 +137,60 @@ fn run_headless(gb: &mut GameBoy) {
     eprintln!();
 }
 
-fn run_windowed(gb: &mut GameBoy) {
+fn run_windowed(gb: &mut GameBoy, config: &config::Config) {
     // Set up audio output via cpal
     let audio_buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
     let _stream = setup_audio(gb, &audio_buffer);
 
-    let mut window = Window::new(
-        "GB Emulator",
-        160,
-        144,
-        WindowOptions {
-            scale: Scale::X4,
-            ..WindowOptions::default()
-        },
-    ).expect("Failed to create window");
+    let mut scale_idx: usize = config.scale_index();
+    let mut window = create_window(SCALE_STEPS[scale_idx].0);
 
     let frame_duration = Duration::from_nanos(16_742_706); // ~59.7 Hz
-    let mut buffer = vec![0u32; 160 * 144];
+    let ff_multiplier = config.speed.fast_forward_multiplier;
+    let mut native_buf = vec![0u32; 160 * 144];
+    let mut buffer = vec![0u32; 320 * 288];
+
+    // Palette and scanline state (from config)
+    let mut palette_idx: usize = config.palette_index();
+    let mut scanlines = config.display.scanlines;
+
+    // Build joypad key map from config
+    let joypad_map = config.joypad_key_map();
+
+    // FPS tracking
+    let mut frame_count: u32 = 0;
+    let mut fps_timer = Instant::now();
+    let mut fps_display: f64 = 0.0;
+
+    // Speed mode
+    let mut speed_mode = SpeedMode::Normal;
+    let mut was_paused = false;
+    let mut ff_locked = false; // Shift+Tab toggle for persistent fast-forward
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let frame_start = Instant::now();
 
         // Handle input
-        update_joypad(&window, gb);
+        update_joypad(&window, gb, &joypad_map);
+
+        // Speed controls
+        let shift_held = window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
+        let tab_held = window.is_key_down(Key::Tab);
+        // Shift+Tab toggles persistent fast-forward
+        if shift_held && window.is_key_pressed(Key::Tab, minifb::KeyRepeat::No) {
+            ff_locked = !ff_locked;
+        }
+        if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
+            speed_mode = if speed_mode == SpeedMode::Paused {
+                SpeedMode::Normal
+            } else {
+                SpeedMode::Paused
+            };
+            ff_locked = false;
+        }
+        if speed_mode != SpeedMode::Paused {
+            speed_mode = if ff_locked || tab_held { SpeedMode::FastForward } else { SpeedMode::Normal };
+        }
 
         // Save states
         if window.is_key_pressed(Key::F5, minifb::KeyRepeat::No) {
@@ -150,29 +204,115 @@ fn run_windowed(gb: &mut GameBoy) {
             }
         }
 
-        // Run one frame
-        gb.run_frame();
-
-        // Drain APU samples into audio buffer
-        drain_audio_samples(gb, &audio_buffer);
-
-        // Convert framebuffer to u32 colors
-        let fb = gb.framebuffer();
-        for (i, &pixel) in fb.iter().enumerate() {
-            buffer[i] = GB_COLORS[(pixel & 0x03) as usize];
+        // Palette / scanline controls
+        if window.is_key_pressed(Key::P, minifb::KeyRepeat::No) {
+            palette_idx = (palette_idx + 1) % PALETTES.len();
+            eprintln!("Palette: {}", PALETTES[palette_idx].0);
+        }
+        if window.is_key_pressed(Key::F10, minifb::KeyRepeat::No) {
+            scanlines = !scanlines;
+            eprintln!("Scanlines: {}", if scanlines { "ON" } else { "OFF" });
         }
 
-        window.update_with_buffer(&buffer, 160, 144).unwrap();
+        // Window scaling
+        if window.is_key_pressed(Key::F11, minifb::KeyRepeat::No) {
+            scale_idx = (scale_idx + 1) % SCALE_STEPS.len();
+            window = create_window(SCALE_STEPS[scale_idx].0);
+            eprintln!("Scale: {}", SCALE_STEPS[scale_idx].1);
+            continue;
+        }
 
-        // Frame timing: sleep most of the wait, then spin-wait for precision
-        let elapsed = frame_start.elapsed();
-        if elapsed < frame_duration {
-            let remaining = frame_duration - elapsed;
-            if remaining > Duration::from_millis(1) {
-                std::thread::sleep(remaining - Duration::from_millis(1));
+        // Determine whether to run a frame
+        let run_frame = match speed_mode {
+            SpeedMode::Normal | SpeedMode::FastForward => true,
+            SpeedMode::Paused => {
+                // Frame step: N advances one frame while paused
+                window.is_key_pressed(Key::N, minifb::KeyRepeat::No)
             }
-            while frame_start.elapsed() < frame_duration {
-                std::hint::spin_loop();
+        };
+
+        if run_frame {
+            gb.run_frame();
+
+            if speed_mode == SpeedMode::FastForward {
+                // Mute audio during fast-forward: discard samples
+                gb.cpu.bus.apu.sample_buffer.clear();
+                if let Ok(mut buf) = audio_buffer.lock() {
+                    buf.clear();
+                }
+            } else {
+                drain_audio_samples(gb, &audio_buffer);
+            }
+        } else if !was_paused {
+            // Just entered pause — clear audio buffer to silence output
+            if let Ok(mut buf) = audio_buffer.lock() {
+                buf.clear();
+            }
+        }
+        was_paused = speed_mode == SpeedMode::Paused;
+
+        // Convert framebuffer to u32 colors with current palette
+        let fb = gb.framebuffer();
+        let palette = &PALETTES[palette_idx].1;
+        for (i, &pixel) in fb.iter().enumerate() {
+            native_buf[i] = palette[(pixel & 0x03) as usize];
+        }
+
+        // Upscale 2x and optionally apply scanlines
+        filters::upscale_nearest(&native_buf, &mut buffer, 160, 144);
+        if scanlines {
+            filters::apply_scanlines(&mut buffer, 320, 288);
+        }
+
+        window.update_with_buffer(&buffer, 320, 288).unwrap();
+
+        // FPS counter
+        frame_count += 1;
+        let fps_elapsed = fps_timer.elapsed();
+        if fps_elapsed >= Duration::from_secs(1) {
+            fps_display = frame_count as f64 / fps_elapsed.as_secs_f64();
+            frame_count = 0;
+            fps_timer = Instant::now();
+            let mode_str = match speed_mode {
+                SpeedMode::Normal => "",
+                SpeedMode::FastForward => " [FAST]",
+                SpeedMode::Paused => " [PAUSED]",
+            };
+            window.set_title(&format!("GB Emulator — {:.1} FPS{}", fps_display, mode_str));
+        }
+
+        // Frame timing
+        match speed_mode {
+            SpeedMode::FastForward => {
+                if ff_multiplier > 0 {
+                    let ff_duration = frame_duration / ff_multiplier;
+                    let elapsed = frame_start.elapsed();
+                    if elapsed < ff_duration {
+                        let remaining = ff_duration - elapsed;
+                        if remaining > Duration::from_millis(1) {
+                            std::thread::sleep(remaining - Duration::from_millis(1));
+                        }
+                        while frame_start.elapsed() < ff_duration {
+                            std::hint::spin_loop();
+                        }
+                    }
+                }
+            }
+            SpeedMode::Paused => {
+                // Sleep briefly to avoid burning CPU while paused
+                std::thread::sleep(Duration::from_millis(16));
+            }
+            SpeedMode::Normal => {
+                let elapsed = frame_start.elapsed();
+                if elapsed < frame_duration {
+                    let remaining = frame_duration - elapsed;
+                    if remaining > Duration::from_millis(1) {
+                        std::thread::sleep(remaining - Duration::from_millis(1));
+                    }
+                    while frame_start.elapsed() < frame_duration {
+                        std::hint::spin_loop();
+                    }
+                }
             }
         }
     }
@@ -256,18 +396,7 @@ fn drain_audio_samples(gb: &mut GameBoy, audio_buffer: &Arc<Mutex<VecDeque<f32>>
     }
 }
 
-fn update_joypad(window: &Window, gb: &mut GameBoy) {
-    let key_map: &[(Key, JoypadKey)] = &[
-        (Key::Right, JoypadKey::Right),
-        (Key::Left, JoypadKey::Left),
-        (Key::Up, JoypadKey::Up),
-        (Key::Down, JoypadKey::Down),
-        (Key::Z, JoypadKey::A),
-        (Key::X, JoypadKey::B),
-        (Key::Backspace, JoypadKey::Select),
-        (Key::Enter, JoypadKey::Start),
-    ];
-
+fn update_joypad(window: &Window, gb: &mut GameBoy, key_map: &[(Key, JoypadKey)]) {
     for &(key, joypad_key) in key_map {
         if window.is_key_down(key) {
             gb.cpu.bus.joypad.key_down(joypad_key);
