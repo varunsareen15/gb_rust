@@ -36,13 +36,13 @@
 
 ## Phase 6: Debug Tools
 - [x] 6.1 — Headless mode (run without window, for testing)
-- [ ] 6.2 — Tile map / VRAM viewer
-- [ ] 6.3 — OAM / sprite viewer
-- [ ] 6.4 — Register inspector + breakpoints
+- [x] 6.2 — Tile map / VRAM viewer
+- [x] 6.3 — OAM / sprite viewer
+- [x] 6.4 — Register inspector + breakpoints
 
 ## Phase 7: Accurate PPU
-- [ ] 7.1 — Pixel FIFO renderer (replaces scanline renderer)
-- [ ] 7.2 — Variable mode 3 timing
+- [x] 7.1 — Pixel FIFO renderer (replaces scanline renderer)
+- [x] 7.2 — Variable mode 3 timing
 
 ## Phase 8: Game Boy Color
 - [ ] 8.1 — CGB palette registers + color rendering

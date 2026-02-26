@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::gameboy::GameBoy;
 
 const MAGIC: [u8; 4] = *b"GBSS";
-const VERSION: u8 = 0x02;
+const VERSION: u8 = 0x03;
 
 // --- Write helpers ---
 
